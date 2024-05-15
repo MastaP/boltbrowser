@@ -29,9 +29,11 @@ build
 *.exe
 boltbrowser
 boltbrowser.*
+bb
 
 # Test Database
 test.db
 *.db
 
 
+.idea
