@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -38,6 +39,7 @@ type BrowserScreen struct {
 	confirmModal   *termboxUtil.ConfirmModal
 	messageTimeout time.Duration
 	messageTime    time.Time
+	hexEditMode    bool
 
 	leftPaneBuffer  []Line
 	rightPaneBuffer []Line
@@ -115,6 +117,16 @@ func (screen *BrowserScreen) handleBrowseKeyEvent(event termbox.Event) int {
 	} else if event.Key == termbox.KeyCtrlR {
 		screen.refreshDatabase()
 
+	} else if event.Key == termbox.KeyCtrlH {
+		if screen.mode == modeChangeKey || screen.mode == modeChangeVal {
+			screen.setMessageWithTimeout("Cannot toggle Hex Edit mode, already editing", 1*time.Second)
+		}
+		screen.hexEditMode = !screen.hexEditMode
+		if screen.hexEditMode {
+			screen.setMessageWithTimeout("Hex Edit mode ON", 1*time.Second)
+		} else {
+			screen.setMessageWithTimeout("Hex Edit mode OFF", 1*time.Second)
+		}
 	} else if event.Key == termbox.KeyCtrlF {
 		// Jump forward half a screen
 		_, h := termbox.Size()
@@ -256,12 +268,23 @@ func (screen *BrowserScreen) handleInputKeyEvent(event termbox.Event) int {
 					}
 				} else if screen.mode == modeChangeVal {
 					newVal := screen.inputModal.GetValue()
-					if err := updatePairValue(screen.currentPath, newVal); err != nil {
-						screen.setMessage("Error occurred updating Pair.")
-					} else {
-						p.val = newVal
-						screen.setMessage("Pair updated!")
-						screen.refreshDatabase()
+					var err error
+					if screen.hexEditMode {
+						var decoded []byte
+						decoded, err = hex.DecodeString(strings.TrimPrefix(strings.ToLower(newVal), "0x"))
+						if err != nil {
+							screen.setMessage("Error: " + err.Error())
+						}
+						newVal = string(decoded)
+					}
+					if err == nil {
+						if err = updatePairValue(screen.currentPath, newVal); err != nil {
+							screen.setMessage("Error occurred updating Pair.")
+						} else {
+							p.val = newVal
+							screen.setMessage("Pair updated!")
+							screen.refreshDatabase()
+						}
 					}
 				}
 			}
@@ -531,7 +554,11 @@ func (screen *BrowserScreen) drawScreen(style Style) {
 		screen.startInsertItemAtParent(typeBucket)
 	}
 	if screen.message == "" {
-		screen.setMessageWithTimeout("Press '?' for help", -1)
+		m := "Press '?' for help"
+		if screen.hexEditMode {
+			m = m + " (Hex Edit Mode ON)"
+		}
+		screen.setMessageWithTimeout(m, -1)
 	}
 	screen.drawLeftPane(style)
 	screen.drawRightPane(style)
@@ -784,7 +811,11 @@ func (screen *BrowserScreen) startEditItem() bool {
 		mod := termboxUtil.CreateInputModal("", inpX, inpY, inpW, inpH, termbox.ColorWhite, termbox.ColorBlack)
 		if p != nil {
 			mod.SetTitle(termboxUtil.AlignText(fmt.Sprintf("Input new value for '%s'", p.key), inpW, termboxUtil.AlignCenter))
-			mod.SetValue(p.val)
+			value := p.val
+			if screen.hexEditMode {
+				value = fmt.Sprintf("0x%x", []byte(value))
+			}
+			mod.SetValue(value)
 		}
 		mod.Show()
 		screen.inputModal = mod
